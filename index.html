@@ -332,14 +332,7 @@
 
       const chips=makeElement('div','chips');
 
-      ['Space','Minecraft','Dinosaurs','Technology'].forEach(topic=>{
-        const button=makeElement('button','chip',topic);
-        button.type='button';
-        button.addEventListener('click',()=>searchInside(topic));
-        chips.append(button);
-      });
-
-      home.append(chips);
+      
       view.append(home);
     }
 
