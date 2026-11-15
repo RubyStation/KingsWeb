@@ -4,7 +4,9 @@
    Code.org + Netlify compatible
    ========================================= */
 
-const MODEL = "gemini-2.5-flash";
+
+const MODEL = "gemini-3.8-flash";
+
 const COOLDOWN_MS = 60_000;
 
 const NETLIFY_ORIGIN =
