@@ -1,5 +1,5 @@
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 const SYSTEM_PROMPT = `
 You are KingsAI, a highly capable general-purpose and educational AI.
