@@ -318,7 +318,7 @@ export default async function handler(request, context) {
           }
         }),
 
-        signal: AbortSignal.timeout(45000)
+        signal: AbortSignal.timeout(20000)
       }
     );
 
