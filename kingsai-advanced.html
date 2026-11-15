@@ -1,1 +1,522 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KingsAI Advanced</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0c1423;
+  color: #f4f5f8;
+  font-family: Arial, sans-serif;
+}
+
+.app {
+  max-width: 950px;
+  margin: auto;
+  min-height: 100vh;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 12px 0 20px;
+  border-bottom: 1px solid #35435a;
+}
+
+h1 {
+  margin: 0 0 7px;
+  color: #f5d477;
+  font-size: 28px;
+}
+
+.subtitle {
+  color: #aab8ce;
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.mode-area {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+select {
+  background: #1e2b40;
+  color: white;
+  border: 1px solid #53617a;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 17px;
+  font-weight: bold;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: #f5d477;
+  color: #181818;
+}
+
+.secondary {
+  background: #30425d;
+  color: white;
+}
+
+#chat {
+  flex: 1;
+  min-height: 360px;
+  background: #131f32;
+  border: 1px solid #293c57;
+  border-radius: 13px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.message {
+  margin-bottom: 23px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.speaker {
+  display: block;
+  font-size: 12px;
+  font-weight: bold;
+  color: #f5d477;
+  margin-bottom: 7px;
+}
+
+.message-content {
+  white-space: pre-wrap;
+}
+
+.attribution {
+  color: #a9b9d1;
+  font-size: 11px;
+  margin-top: 9px;
+}
+
+.sources {
+  border-top: 1px solid #34445d;
+  margin-top: 13px;
+  padding-top: 10px;
+  font-size: 13px;
+}
+
+.sources strong {
+  color: #f5d477;
+}
+
+.sources a {
+  display: block;
+  color: #8dc9ff;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  background: #18263a;
+  border: 1px solid #354862;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 15px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 95px;
+  resize: vertical;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: white;
+  padding: 9px;
+  font: inherit;
+  font-size: 15px;
+}
+
+textarea::placeholder {
+  color: #8293aa;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.small {
+  color: #9aabc2;
+  font-size: 12px;
+}
+
+#status {
+  margin-top: 11px;
+  color: #f5d477;
+  font-size: 12px;
+  min-height: 16px;
+}
+
+#modeDescription {
+  color: #9aabc2;
+  font-size: 11px;
+  margin-top: 5px;
+}
+
+.footer {
+  color: #7f90a8;
+  font-size: 11px;
+  margin-top: 15px;
+  text-align: center;
+}
+
+@media(max-width: 550px) {
+  .app {
+    padding: 13px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <header>
+    <h1>👑 KingsAI Advanced</h1>
+    <div class="subtitle">
+      Powered by Google Gemini
+    </div>
+  </header>
+
+  <div class="toolbar">
+
+    <div>
+      <div class="mode-area">
+        <label for="mode">Thinking mode:</label>
+
+        <select id="mode">
+          <option value="instant">Instant</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+
+      <div id="modeDescription">
+        Balanced reasoning for everyday questions.
+      </div>
+    </div>
+
+    <button class="secondary" id="clear">
+      New conversation
+    </button>
+
+  </div>
+
+  <main id="chat" aria-live="polite">
+
+    <div class="message">
+      <span class="speaker">👑 KINGSAI</span>
+
+      <div class="message-content">Welcome to KingsAI Advanced!
+
+I'm powered by Google Gemini.
+
+Ask me about mathematics, geometry, science, history,
+social studies, grammar, vocabulary, programming,
+multiple-choice questions, or almost anything else.
+
+Choose your thinking mode and ask your first question!</div>
+
+      <div class="attribution">
+        Powered by Google Gemini
+      </div>
+    </div>
+
+  </main>
+
+  <div class="composer">
+
+    <textarea
+      id="question"
+      maxlength="8000"
+      placeholder="Ask KingsAI anything..."
+      aria-label="Your question"
+    ></textarea>
+
+    <div class="actions">
+      <span class="small">
+        Press Enter to send · Shift + Enter for a new line
+      </span>
+
+      <button class="primary" id="send">
+        Send ↑
+      </button>
+    </div>
+
+    <div id="status" role="status"></div>
+
+  </div>
+
+  <div class="footer">
+    KingsAI can make mistakes. Verify important information.
+  </div>
+
+</div>
+
+<script>
+const chat = document.getElementById("chat");
+const question = document.getElementById("question");
+const send = document.getElementById("send");
+const mode = document.getElementById("mode");
+const status = document.getElementById("status");
+const modeDescription =
+  document.getElementById("modeDescription");
+
+let history = [];
+let busy = false;
+let accessCode = sessionStorage.getItem("kingsaiAccessCode") || "";
+
+const descriptions = {
+  instant: "Low reasoning effort for faster answers.",
+  medium: "Balanced reasoning for everyday questions.",
+  high: "Deeper reasoning for difficult questions."
+};
+
+mode.addEventListener("change", () => {
+  modeDescription.textContent = descriptions[mode.value];
+});
+
+function addMessage(role, text, sources = []) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "message";
+
+  const speaker = document.createElement("span");
+  speaker.className = "speaker";
+  speaker.textContent =
+    role === "user" ? "YOU" : "👑 KINGSAI";
+
+  const content = document.createElement("div");
+  content.className = "message-content";
+  content.textContent = text;
+
+  wrapper.append(speaker, content);
+
+  if (role === "assistant") {
+    const attribution = document.createElement("div");
+    attribution.className = "attribution";
+    attribution.textContent = "Generated by Google Gemini";
+    wrapper.appendChild(attribution);
+  }
+
+  if (sources.length) {
+    const sourceBox = document.createElement("div");
+    sourceBox.className = "sources";
+
+    const heading = document.createElement("strong");
+    heading.textContent = "Research sources";
+    sourceBox.appendChild(heading);
+
+    sources.forEach(source => {
+      try {
+        const url = new URL(source.url);
+
+        if (!["https:", "http:"].includes(url.protocol)) {
+          return;
+        }
+
+        const link = document.createElement("a");
+        link.href = url.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = source.title || "Open source";
+
+        sourceBox.appendChild(link);
+      } catch {
+        // Ignore invalid source links.
+      }
+    });
+
+    wrapper.appendChild(sourceBox);
+  }
+
+  chat.appendChild(wrapper);
+  chat.scrollTop = chat.scrollHeight;
+
+  return wrapper;
+}
+
+function getAccessCode() {
+  if (accessCode) return accessCode;
+
+  const entered = prompt("Enter your KingsAI access code:");
+
+  if (!entered || !entered.trim()) return null;
+
+  accessCode = entered.trim();
+
+  sessionStorage.setItem("kingsaiAccessCode", accessCode);
+
+  return accessCode;
+}
+
+async function askKingsAI() {
+  const text = question.value.trim();
+
+  if (!text || busy) return;
+
+  busy = true;
+  send.disabled = true;
+
+  addMessage("user", text);
+
+  question.value = "";
+
+  status.textContent =
+    "Sending your question to Gemini (" + mode.value + ")...";
+
+  const loading = addMessage(
+    "assistant",
+    "Gemini is thinking and preparing your answer..."
+  );
+
+  try {
+    const code = getAccessCode();
+
+    if (!code) {
+      loading.remove();
+      status.textContent = "Access code required.";
+      return;
+    }
+
+    const result = await fetch(
+      "/.netlify/functions/kingsai",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-kingsai-access-code": code
+        },
+        body: JSON.stringify({
+          question: text,
+          mode: mode.value,
+          history: history
+        })
+      }
+    );
+
+    const data = await result.json();
+
+    loading.remove();
+
+    if (result.status === 401) {
+      accessCode = "";
+      sessionStorage.removeItem("kingsaiAccessCode");
+      throw new Error("Incorrect access code. Please try again.");
+    }
+
+    if (!result.ok) {
+      throw new Error(
+        data.error || "Gemini request failed."
+      );
+    }
+
+    addMessage(
+      "assistant",
+      data.answer,
+      data.sources || []
+    );
+
+    history.push(
+      { role: "user", text: text },
+      { role: "model", text: data.answer }
+    );
+
+    history = history.slice(-12);
+
+    status.textContent =
+      "Gemini answered using " +
+      data.thinkingLevel.toUpperCase() +
+      " thinking.";
+
+  } catch (error) {
+    loading.remove();
+
+    addMessage(
+      "assistant",
+      "KingsAI encountered a problem:\n\n" +
+      error.message
+    );
+
+    status.textContent = "Request unsuccessful.";
+
+  } finally {
+    busy = false;
+    send.disabled = false;
+    question.focus();
+  }
+}
+
+send.addEventListener("click", askKingsAI);
+
+question.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    askKingsAI();
+  }
+});
+
+document.getElementById("clear").addEventListener("click", () => {
+  if (busy) return;
+
+  history = [];
+  chat.replaceChildren();
+
+  addMessage(
+    "assistant",
+    "A new conversation has started! What would you like to ask?"
+  );
+
+  status.textContent = "";
+});
+</script>
+
+</body>
+</html>
