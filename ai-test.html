@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KingsAI Browser Test</title>
+  <style>
+    body {
+      background: #101726;
+      color: white;
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: 35px auto;
+      padding: 16px;
+    }
+    h1 { color: #f6d476; }
+    button {
+      background: #f6d476;
+      color: #161616;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 18px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:disabled { opacity: .5; }
+    #chat {
+      background: #1c2940;
+      border-radius: 10px;
+      min-height: 120px;
+      padding: 15px;
+      margin: 16px 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    #question {
+      padding: 12px;
+      border-radius: 8px;
+      width: 65%;
+      max-width: 350px;
+    }
+    #status { color: #f6d476; }
+  </style>
+</head>
+<body>
+  <h1>👑 KingsAI — Browser Test</h1>
+  <p>Testing real AI inside Code.org.</p>
+
+  <p id="status">AI is not loaded yet.</p>
+  <button id="load">Load KingsAI</button>
+
+  <div id="chat">KingsAI: Welcome, Your Majesty!</div>
+
+  <input id="question" placeholder="Ask KingsAI anything...">
+  <button id="send" disabled>Send</button>
+
+  <script type="module">
+    const status = document.getElementById("status");
+    const load = document.getElementById("load");
+    const send = document.getElementById("send");
+    const question = document.getElementById("question");
+    const chat = document.getElementById("chat");
+
+    let generator = null;
+    let messages = [
+      {
+        role: "system",
+        content: "You are KingsAI, a friendly, helpful AI assistant. Answer questions clearly, accurately, and concisely."
+      }
+    ];
+
+    load.onclick = async () => {
+      load.disabled = true;
+      status.textContent = "Loading AI library...";
+
+      try {
+        const library = await import(
+          "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1"
+        );
+
+        status.textContent = "Downloading AI model...";
+
+        const device = navigator.gpu ? "webgpu" : "wasm";
+
+        generator = await library.pipeline(
+          "text-generation",
+          "onnx-community/Qwen2.5-0.5B-Instruct",
+          {
+            device: device,
+            dtype: "q4",
+            progress_callback: (progress) => {
+              if (progress.status === "progress") {
+                status.textContent =
+                  "Downloading: " +
+                  Math.round(progress.progress || 0) + "%";
+              }
+            }
+          }
+        );
+
+        status.textContent = "KingsAI is ready! 👑";
+        send.disabled = false;
+        load.textContent = "AI Loaded";
+      } catch (error) {
+        status.textContent = "AI failed to load: " + error.message;
+        console.error("KingsAI load error:", error);
+        load.disabled = false;
+      }
+    };
+
+    async function askKingsAI() {
+      if (!generator || !question.value.trim()) return;
+
+      const prompt = question.value.trim();
+      question.value = "";
+      send.disabled = true;
+
+      chat.textContent += "\n\nYou: " + prompt;
+      chat.textContent += "\n\nKingsAI: Thinking...";
+
+      const nextMessages = [
+        ...messages,
+        { role: "user", content: prompt }
+      ];
+
+      try {
+        const output = await generator(nextMessages, {
+          max_new_tokens: 200,
+          do_sample: false
+        });
+
+        const answer =
+          output[0].generated_text.at(-1).content;
+
+        chat.textContent = chat.textContent.replace(
+          /KingsAI: Thinking\.\.\.$/,
+          "KingsAI: " + answer
+        );
+
+        messages = nextMessages;
+        messages.push({
+          role: "assistant",
+          content: answer
+        });
+
+        // Keep conversation memory reasonably small.
+        if (messages.length > 11) {
+          messages = [messages[0], ...messages.slice(-10)];
+        }
+      } catch (error) {
+        chat.textContent = chat.textContent.replace(
+          /KingsAI: Thinking\.\.\.$/,
+          "KingsAI error: " + error.message
+        );
+      }
+
+      send.disabled = false;
+    }
+
+    send.onclick = askKingsAI;
+
+    question.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") askKingsAI();
+    });
+  </script>
+</body>
+</html>
