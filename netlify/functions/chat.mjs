@@ -1,20 +1,9 @@
 
-const MODEL = "gemini-3.8-flash";
-const COOLDOWN_MS = 60_000;
-const TIMEOUT_MS = 25_000;
+const MODEL = "gemini-3.5-flash-lite";
+const COOLDOWN_MS = 60000;
+const TIMEOUT_MS = 18000;
 
 const lastRequestByVisitor = new Map();
-
-function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-      ...headers
-    }
-  });
-}
 
 function corsHeaders(request) {
   const origin = request.headers.get("Origin") || "";
@@ -34,6 +23,17 @@ function corsHeaders(request) {
   };
 }
 
+function json(data, status, headers) {
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...headers
+    }
+  });
+}
+
 function phoenixTime() {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Phoenix",
@@ -45,8 +45,12 @@ function phoenixTime() {
 export default async function handler(request, context) {
   const headers = corsHeaders(request);
 
-  const reply = (data, status = 200, extra = {}) =>
-    json(data, status, { ...headers, ...extra });
+  function reply(data, status, extraHeaders) {
+    return json(data, status, {
+      ...headers,
+      ...extraHeaders
+    });
+  }
 
   if (request.method === "OPTIONS") {
     return new Response(null, {
@@ -65,14 +69,15 @@ export default async function handler(request, context) {
   const accessCode = process.env.KINGSAI_ACCESS_CODE;
 
   if (!apiKey || !accessCode) {
-    console.error("KingsAI environment variables missing");
+    console.error("KingsAI configuration missing");
 
     return reply({
       error: "KingsAI is not fully configured."
     }, 503);
   }
 
-  const suppliedCode = request.headers.get("X-KingsWeb-Code");
+  const suppliedCode =
+    request.headers.get("X-KingsWeb-Code");
 
   if (!suppliedCode || suppliedCode !== accessCode) {
     return reply({
@@ -103,11 +108,20 @@ export default async function handler(request, context) {
       typeof message.content === "string" &&
       message.content.trim()
     )
-    .slice(-12);
+    .slice(-12)
+    .map(message => ({
+      role: message.role === "assistant"
+        ? "model"
+        : "user",
+      parts: [{
+        text: message.content.slice(0, 1200)
+      }]
+    }));
 
-  const latest = messages[messages.length - 1];
-
-  if (!latest || latest.role !== "user") {
+  if (
+    !messages.length ||
+    messages[messages.length - 1].role !== "user"
+  ) {
     return reply({
       error: "Please enter a message."
     }, 400);
@@ -126,58 +140,39 @@ export default async function handler(request, context) {
     const seconds = Math.ceil(remaining / 1000);
 
     return reply({
-      error: `👑 Please wait ${seconds} seconds before sending another message.`,
+      error:
+        "👑 Please wait " + seconds +
+        " seconds before sending another message.",
       retryAfter: seconds
     }, 429, {
       "Retry-After": String(seconds)
     });
   }
 
-  lastRequestByVisitor.set(visitor, now);
-
-  // Clean up expired cooldown entries.
-  if (lastRequestByVisitor.size > 1000) {
-    for (const [id, timestamp] of lastRequestByVisitor) {
-      if (now - timestamp > COOLDOWN_MS) {
-        lastRequestByVisitor.delete(id);
-      }
-    }
-  }
-
-  const systemInstruction =
+  const systemPrompt =
     "You are KingsAI, the friendly royal AI assistant " +
-    "inside KingsWeb. " +
+    "inside a website called KingsWeb. " +
     "Be helpful, clear, and welcoming. " +
     "Use a crown emoji occasionally. " +
     "Your name is KingsAI. " +
     "You are powered by Google's Gemini model. " +
     "Never claim KingsWeb created the underlying AI model. " +
     "For local time questions, use Phoenix, Arizona time. " +
-    "The current Phoenix date and time is: " +
+    "The current Phoenix date and time is " +
     phoenixTime() + ".";
-
-  // Preserve recent conversation history without storing
-  // the interaction on Google's server.
-  const input = messages.map(message => ({
-    type: message.role === "user"
-      ? "user_input"
-      : "model_output",
-    content: [{
-      type: "text",
-      text: message.content.slice(0, 1200)
-    }]
-  }));
 
   const started = Date.now();
 
-  console.log("KingsAI Interactions request started", {
+  console.log("KingsAI request started", {
     model: MODEL,
-    messageCount: input.length
+    messageCount: messages.length
   });
 
   try {
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/interactions",
+      "https://generativelanguage.googleapis.com/v1beta/models/" +
+      encodeURIComponent(MODEL) +
+      ":generateContent",
       {
         method: "POST",
         headers: {
@@ -185,48 +180,51 @@ export default async function handler(request, context) {
           "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
-          model: MODEL,
-          input,
-          system_instruction: systemInstruction,
-          store: false,
-          generation_config: {
-            max_output_tokens: 1024,
-            thinking_level: "low"
+          systemInstruction: {
+            parts: [{
+              text: systemPrompt
+            }]
+          },
+          contents: messages,
+          generationConfig: {
+            maxOutputTokens: 1024
           }
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS)
       }
     );
 
-    const elapsed = Date.now() - started;
-    const raw = await response.text();
-
-    let data;
-
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      console.error("Gemini returned invalid JSON", {
-        status: response.status,
-        elapsed
-      });
-
-      return reply({
-        error: "Gemini returned an invalid response."
-      }, 502);
-    }
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      console.error("Gemini Interactions API error", {
+      console.error("Gemini API error", {
         status: response.status,
-        elapsed,
-        details: data.error?.message?.slice(0, 800)
+        details: data.error?.message,
+        elapsed: Date.now() - started
       });
+
+      if (response.status === 404) {
+        return reply({
+          error:
+            "Gemini model not found or unavailable " +
+            "for this API key. Check Netlify logs."
+        }, 502);
+      }
 
       if (response.status === 429) {
         return reply({
-          error: "👑 Gemini usage limit reached. Please try again later."
+          error:
+            "👑 Gemini usage limit reached. " +
+            "Please try again later."
         }, 429);
+      }
+
+      if (response.status === 503) {
+        return reply({
+          error:
+            "The AI service is overloaded. " +
+            "Please try again later."
+        }, 503);
       }
 
       return reply({
@@ -237,68 +235,55 @@ export default async function handler(request, context) {
       }, 502);
     }
 
-    if (data.status && data.status !== "completed") {
-      console.error("Gemini interaction not completed", {
-        status: data.status,
-        elapsed
-      });
-
-      return reply({
-        error: "Gemini did not finish its response."
-      }, 502);
-    }
-
-    const steps = Array.isArray(data.steps)
-      ? data.steps
-      : [];
-
-    const modelSteps = steps.filter(
-      step => step.type === "model_output"
-    );
-
-    const lastModelStep =
-      modelSteps[modelSteps.length - 1];
-
-    const text = (lastModelStep?.content || [])
-      .filter(part => part.type === "text")
+    const text = (
+      data.candidates?.[0]?.content?.parts || []
+    )
       .map(part => part.text || "")
       .join("")
       .trim();
 
     if (!text) {
       console.error("Gemini returned no text", {
-        status: data.status,
-        stepTypes: steps.map(step => step.type),
-        elapsed
+        elapsed: Date.now() - started
       });
 
       return reply({
-        error: "Gemini responded without usable text."
+        error:
+          "KingsAI received no text response. " +
+          "Please try again."
       }, 502);
     }
 
+    lastRequestByVisitor.set(visitor, Date.now());
+
+    if (lastRequestByVisitor.size > 1000) {
+      for (const [id, timestamp] of lastRequestByVisitor) {
+        if (Date.now() - timestamp > COOLDOWN_MS) {
+          lastRequestByVisitor.delete(id);
+        }
+      }
+    }
+
     console.log("KingsAI response successful", {
-      elapsed,
+      elapsed: Date.now() - started,
       characters: text.length
     });
 
-    return reply({
-      reply: text
-    });
+    return reply({ reply: text });
 
   } catch (error) {
-    const elapsed = Date.now() - started;
-
     console.error("KingsAI request failed", {
       name: error.name,
       message: error.message,
-      elapsed
+      elapsed: Date.now() - started
     });
 
     return reply({
-      error: error.name === "TimeoutError"
-        ? "KingsAI took too long to respond. Please try again."
-        : "KingsAI could not connect to Gemini."
+      error:
+        error.name === "TimeoutError" ||
+        error.name === "AbortError"
+          ? "KingsAI took too long to respond. Please try again."
+          : "KingsAI could not connect to Gemini."
     }, 503);
   }
 }
