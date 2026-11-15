@@ -1,82 +1,9 @@
 
-/* =========================================
-   KINGSWEB — KINGSAI GEMINI BACKEND
-   Code.org + Netlify compatible
-   ========================================= */
-
-
 const MODEL = "gemini-3.8-flash";
-
 const COOLDOWN_MS = 60_000;
 
-const NETLIFY_ORIGIN =
-  "https://deft-melomakarona-812c82.netlify.app";
-
-// Temporary cooldown storage.
-// May reset or differ across Netlify instances.
+// Temporary cooldown stored in function memory.
 const lastRequestByVisitor = new Map();
-
-/* =========================================
-   CORS — ALLOW KINGSAI ON CODE.ORG
-   ========================================= */
-
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-
-  if (origin === NETLIFY_ORIGIN) return true;
-
-  try {
-    const url = new URL(origin);
-
-    if (url.protocol !== "https:") {
-      return false;
-    }
-
-    // Code.org editor and project previews
-    if (
-      url.hostname === "code.org" ||
-      url.hostname.endsWith(".code.org")
-    ) {
-      return true;
-    }
-
-    // Code.org published project hosting
-    if (
-      url.hostname === "codeprojects.org" ||
-      url.hostname.endsWith(".codeprojects.org")
-    ) {
-      return true;
-    }
-
-    return false;
-
-  } catch {
-    return false;
-  }
-}
-
-function getCorsHeaders(request) {
-  const origin =
-    request.headers.get("Origin") || "";
-
-  if (!isAllowedOrigin(origin)) {
-    return {};
-  }
-
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods":
-      "POST, OPTIONS",
-    "Access-Control-Allow-Headers":
-      "Content-Type, X-KingsWeb-Code",
-    "Access-Control-Max-Age": "600",
-    "Vary": "Origin"
-  };
-}
-
-/* =========================================
-   JSON RESPONSE HELPER
-   ========================================= */
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -89,10 +16,6 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
-/* =========================================
-   PHOENIX TIME
-   ========================================= */
-
 function phoenixTime() {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Phoenix",
@@ -101,302 +24,232 @@ function phoenixTime() {
   }).format(new Date());
 }
 
-/* =========================================
-   MAIN KINGSAI HANDLER
-   ========================================= */
+function corsHeaders(request) {
+  const origin = request.headers.get("Origin") || "";
+
+  const allowed =
+    origin === "https://deft-melomakarona-812c82.netlify.app" ||
+    /^https:\/\/([a-z0-9-]+\.)?studio\.code\.org$/.test(origin);
+
+  return {
+    "Access-Control-Allow-Origin": allowed
+      ? origin
+      : "https://deft-melomakarona-812c82.netlify.app",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "Content-Type, X-KingsWeb-Code",
+    "Vary": "Origin"
+  };
+}
 
 export default async function handler(request, context) {
+  const headers = corsHeaders(request);
 
-  const cors = getCorsHeaders(request);
+  const reply = (data, status = 200, extra = {}) =>
+    json(data, status, { ...headers, ...extra });
 
-  const origin =
-    request.headers.get("Origin") || "";
-
-  // Browser CORS preflight
   if (request.method === "OPTIONS") {
-
-    if (!isAllowedOrigin(origin)) {
-      return json({
-        error: "Origin not allowed."
-      }, 403);
-    }
-
     return new Response(null, {
       status: 204,
-      headers: cors
+      headers
     });
   }
 
-  // All normal responses include CORS headers.
-  const reply = (data, status = 200, extra = {}) => {
-    return json(data, status, {
-      ...cors,
-      ...extra
-    });
-  };
-
-  // Reject unauthorized browser origins.
-  if (origin && !isAllowedOrigin(origin)) {
-    return reply({
-      error: "Origin not allowed."
-    }, 403);
-  }
-
-  // Only accept POST requests.
   if (request.method !== "POST") {
-    return reply({
-      error: "Only POST requests are supported."
-    }, 405);
+    return reply({ error: "POST required." }, 405);
   }
-
-  /* =====================================
-     PRIVATE ENVIRONMENT VARIABLES
-     ===================================== */
 
   const apiKey = process.env.GEMINI_API_KEY;
-  const accessCode =
-    process.env.KINGSAI_ACCESS_CODE;
+  const accessCode = process.env.KINGSAI_ACCESS_CODE;
 
   if (!apiKey || !accessCode) {
+    console.error("KingsAI configuration is missing.");
     return reply({
-      error: "KingsAI is not fully configured yet."
+      error: "KingsAI environment variables are missing."
     }, 503);
   }
 
-  /* =====================================
-     VERIFY KINGSAI ACCESS CODE
-     ===================================== */
-
-  const suppliedCode =
-    request.headers.get("X-KingsWeb-Code");
+  const suppliedCode = request.headers.get("X-KingsWeb-Code");
 
   if (!suppliedCode || suppliedCode !== accessCode) {
     return reply({
-      error: "Incorrect or missing KingsAI access code."
+      error: "Incorrect KingsAI access code."
     }, 401);
   }
-
-  /* =====================================
-     READ CHAT MESSAGES
-     ===================================== */
 
   let body;
 
   try {
     body = await request.json();
   } catch {
-    return reply({
-      error: "Invalid request."
-    }, 400);
+    return reply({ error: "Invalid JSON." }, 400);
   }
 
   if (!Array.isArray(body.messages)) {
-    return reply({
-      error: "Messages are required."
-    }, 400);
+    return reply({ error: "Messages are required." }, 400);
   }
 
   const messages = body.messages
-    .slice(-12)
-    .filter(message =>
-      message &&
-      ["user", "assistant"].includes(message.role) &&
-      typeof message.content === "string"
+    .filter(m =>
+      m &&
+      (m.role === "user" || m.role === "assistant") &&
+      typeof m.content === "string"
     )
-    .map(message => ({
-      role:
-        message.role === "assistant"
-          ? "model"
-          : "user",
+    .slice(-12);
 
-      parts: [{
-        text: message.content.slice(0, 1200)
-      }]
-    }));
+  const latest = messages[messages.length - 1];
 
-  if (
-    !messages.length ||
-    messages[messages.length - 1].role !== "user"
-  ) {
+  if (!latest || latest.role !== "user" ||
+      !latest.content.trim()) {
     return reply({
-      error: "Please send a message to KingsAI."
+      error: "Please enter a message."
     }, 400);
   }
 
-  /* =====================================
-     60-SECOND COOLDOWN
-     ===================================== */
-
   const visitor =
     context.ip ||
-    request.headers.get(
-      "x-nf-client-connection-ip"
-    ) ||
+    request.headers.get("x-nf-client-connection-ip") ||
     "unknown";
 
   const now = Date.now();
-
-  const lastRequest =
-    lastRequestByVisitor.get(visitor) || 0;
-
-  const remaining =
-    COOLDOWN_MS - (now - lastRequest);
+  const previous = lastRequestByVisitor.get(visitor) || 0;
+  const remaining = COOLDOWN_MS - (now - previous);
 
   if (remaining > 0) {
-    const retryAfter =
-      Math.ceil(remaining / 1000);
+    const seconds = Math.ceil(remaining / 1000);
 
     return reply({
-      error:
-        "👑 Please wait " +
-        retryAfter +
-        " seconds before sending another message.",
-      retryAfter
+      error: `👑 Please wait ${seconds} seconds before trying again.`,
+      retryAfter: seconds
     }, 429, {
-      "Retry-After": String(retryAfter)
+      "Retry-After": String(seconds)
     });
   }
 
-  // Start cooldown before the Gemini request.
   lastRequestByVisitor.set(visitor, now);
 
-  // Remove expired entries when memory grows.
-  if (lastRequestByVisitor.size > 1000) {
-
-    for (const [id, timestamp] of lastRequestByVisitor) {
-
-      if (now - timestamp > COOLDOWN_MS) {
-        lastRequestByVisitor.delete(id);
-      }
-
-    }
-  }
-
-  /* =====================================
-     KINGSAI PERSONALITY
-     ===================================== */
-
   const prompt =
-    "You are KingsAI, the friendly royal AI assistant " +
-    "inside a website called KingsWeb. " +
-    "Be helpful, clear, and welcoming. " +
-    "You may use a crown emoji occasionally. " +
+    "You are KingsAI, the friendly royal assistant " +
+    "inside KingsWeb. Be helpful, clear and concise. " +
     "Your name is KingsAI. " +
     "You are powered by Google's Gemini model. " +
-    "Never claim that KingsWeb created the underlying AI model. " +
-    "For local time questions, use Phoenix, Arizona time. " +
-    "The current Phoenix date and time is: " +
-    phoenixTime() + ".";
+    "For local time questions, use Phoenix, Arizona. " +
+    "Current Phoenix time: " + phoenixTime() + ".";
 
-  /* =====================================
-     SEND REQUEST TO GOOGLE GEMINI
-     ===================================== */
+  // Diagnostic test: send ONLY the newest message.
+  // This isolates problems caused by conversation history.
+  const testInput =
+    prompt + "\n\nUser: " +
+    latest.content.slice(0, 1200);
+
+  const started = Date.now();
+
+  console.log("KingsAI diagnostic request started", {
+    model: MODEL,
+    endpoint: "generateContent",
+    inputLength: testInput.length
+  });
 
   try {
-
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/" +
-      MODEL +
-      ":generateContent",
+      MODEL + ":generateContent",
       {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": apiKey
         },
-
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: prompt }]
-          },
-
-          contents: messages,
-
+          contents: [{
+            role: "user",
+            parts: [{ text: testInput }]
+          }],
           generationConfig: {
-            maxOutputTokens: 600
+            maxOutputTokens: 256
           }
         }),
-
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(12000)
       }
     );
 
-    /* =================================
-       GEMINI USAGE LIMIT
-       ================================= */
+    const elapsed = Date.now() - started;
+    const raw = await response.text();
 
-    if (response.status === 429) {
-      return reply({
-        error:
-          "👑 KingsAI has reached a Gemini usage limit. Please try again later."
-      }, 429);
-    }
-
-    /* =================================
-       GEMINI SERVICE ERROR
-       ================================= */
-
-    if (!response.ok) {
-
-     
-const errorBody = await response.text();
-
-console.error(
-  "Gemini API status:",
-  response.status,
-  "Details:",
-  errorBody.slice(0, 1500)
-);
-
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      console.error("Gemini returned non-JSON", {
+        status: response.status,
+        elapsed
+      });
 
       return reply({
-        error:
-          "KingsAI could not reach the AI service. Check the model and free-tier availability."
+        error: "Gemini returned an invalid response."
       }, 502);
     }
 
-    /* =================================
-       READ GEMINI ANSWER
-       ================================= */
-
-    const data = await response.json();
-
-    const answer =
-      (data.candidates?.[0]?.content?.parts || [])
-        .map(part => part.text || "")
-        .join("")
-        .trim();
-
-    if (!answer) {
-      return reply({
-        error:
-          "KingsAI did not receive a text response. Please try again."
-      }, 502);
-    }
-
-    /* =================================
-       SUCCESSFUL KINGSAI REPLY
-       ================================= */
-
-    return reply({
-      reply: answer
+    console.log("Gemini diagnostic result", {
+      status: response.status,
+      elapsed,
+      errorCode: data.error?.code || null,
+      errorStatus: data.error?.status || null,
+      errorMessage: data.error?.message?.slice(0, 500) || null
     });
 
-  } catch (error) {
+    if (!response.ok) {
+      if (response.status === 429) {
+        return reply({
+          error: "Gemini API rate limit reached. Try again later."
+        }, 429);
+      }
 
-    console.error(
-      "KingsAI request failed:",
-      error.message
-    );
+      return reply({
+        error:
+          "Gemini API returned HTTP " +
+          response.status +
+          ". Check Netlify function logs."
+      }, 502);
+    }
+
+    const text = (
+      data.candidates?.[0]?.content?.parts || []
+    )
+      .map(part => part.text || "")
+      .join("")
+      .trim();
+
+    if (!text) {
+      console.error("Gemini returned no text", {
+        finishReason:
+          data.candidates?.[0]?.finishReason || null
+      });
+
+      return reply({
+        error: "Gemini responded without usable text."
+      }, 502);
+    }
+
+    console.log("KingsAI diagnostic succeeded", {
+      elapsed
+    });
+
+    return reply({ reply: text });
+
+  } catch (error) {
+    const elapsed = Date.now() - started;
+
+    console.error("KingsAI diagnostic failed", {
+      name: error.name,
+      message: error.message,
+      elapsed
+    });
 
     return reply({
-      error:
-        "KingsAI is temporarily unavailable. Please try again later."
+      error: error.name === "TimeoutError"
+        ? "Gemini did not respond within 12 seconds."
+        : "KingsAI network request failed. Check Netlify logs."
     }, 503);
   }
 }
-
-/* =========================================
-   END OF KINGSAI BACKEND
-   ========================================= */
