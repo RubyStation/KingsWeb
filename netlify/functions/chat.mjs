@@ -337,10 +337,16 @@ export default async function handler(request, context) {
 
     if (!response.ok) {
 
-      console.error(
-        "Gemini API status:",
-        response.status
-      );
+     
+const errorBody = await response.text();
+
+console.error(
+  "Gemini API status:",
+  response.status,
+  "Details:",
+  errorBody.slice(0, 1500)
+);
+
 
       return reply({
         error:
