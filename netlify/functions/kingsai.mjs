@@ -129,10 +129,37 @@ Adapt the level of explanation to the question.
 Your goal is to be accurate, useful, clear, and honest.
 `;
 
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, x-kingsai-access-code",
+  "Access-Control-Max-Age": "86400"
+};
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+export default async function handler(request) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: CORS_HEADERS
+    });
+  }
+
+  if (request.method !== "POST") {
+    return json({ error: "Only POST requests are allowed." }, 405);
+  }
+
       "Content-Type": "application/json",
       "Cache-Control": "no-store"
     }
