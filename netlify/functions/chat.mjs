@@ -1,8 +1,8 @@
 
 const MODEL = "gemini-3.8-flash";
 const COOLDOWN_MS = 60_000;
+const TIMEOUT_MS = 25_000;
 
-// Temporary cooldown stored in function memory.
 const lastRequestByVisitor = new Map();
 
 function json(data, status = 200, headers = {}) {
@@ -14,14 +14,6 @@ function json(data, status = 200, headers = {}) {
       ...headers
     }
   });
-}
-
-function phoenixTime() {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Phoenix",
-    dateStyle: "full",
-    timeStyle: "short"
-  }).format(new Date());
 }
 
 function corsHeaders(request) {
@@ -42,6 +34,14 @@ function corsHeaders(request) {
   };
 }
 
+function phoenixTime() {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    dateStyle: "full",
+    timeStyle: "short"
+  }).format(new Date());
+}
+
 export default async function handler(request, context) {
   const headers = corsHeaders(request);
 
@@ -56,16 +56,19 @@ export default async function handler(request, context) {
   }
 
   if (request.method !== "POST") {
-    return reply({ error: "POST required." }, 405);
+    return reply({
+      error: "Only POST requests are supported."
+    }, 405);
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   const accessCode = process.env.KINGSAI_ACCESS_CODE;
 
   if (!apiKey || !accessCode) {
-    console.error("KingsAI configuration is missing.");
+    console.error("KingsAI environment variables missing");
+
     return reply({
-      error: "KingsAI environment variables are missing."
+      error: "KingsAI is not fully configured."
     }, 503);
   }
 
@@ -73,7 +76,7 @@ export default async function handler(request, context) {
 
   if (!suppliedCode || suppliedCode !== accessCode) {
     return reply({
-      error: "Incorrect KingsAI access code."
+      error: "Incorrect or missing KingsAI access code."
     }, 401);
   }
 
@@ -82,25 +85,29 @@ export default async function handler(request, context) {
   try {
     body = await request.json();
   } catch {
-    return reply({ error: "Invalid JSON." }, 400);
+    return reply({
+      error: "Invalid request body."
+    }, 400);
   }
 
   if (!Array.isArray(body.messages)) {
-    return reply({ error: "Messages are required." }, 400);
+    return reply({
+      error: "Messages are required."
+    }, 400);
   }
 
   const messages = body.messages
-    .filter(m =>
-      m &&
-      (m.role === "user" || m.role === "assistant") &&
-      typeof m.content === "string"
+    .filter(message =>
+      message &&
+      ["user", "assistant"].includes(message.role) &&
+      typeof message.content === "string" &&
+      message.content.trim()
     )
     .slice(-12);
 
   const latest = messages[messages.length - 1];
 
-  if (!latest || latest.role !== "user" ||
-      !latest.content.trim()) {
+  if (!latest || latest.role !== "user") {
     return reply({
       error: "Please enter a message."
     }, 400);
@@ -119,7 +126,7 @@ export default async function handler(request, context) {
     const seconds = Math.ceil(remaining / 1000);
 
     return reply({
-      error: `👑 Please wait ${seconds} seconds before trying again.`,
+      error: `👑 Please wait ${seconds} seconds before sending another message.`,
       retryAfter: seconds
     }, 429, {
       "Retry-After": String(seconds)
@@ -128,32 +135,49 @@ export default async function handler(request, context) {
 
   lastRequestByVisitor.set(visitor, now);
 
-  const prompt =
-    "You are KingsAI, the friendly royal assistant " +
-    "inside KingsWeb. Be helpful, clear and concise. " +
+  // Clean up expired cooldown entries.
+  if (lastRequestByVisitor.size > 1000) {
+    for (const [id, timestamp] of lastRequestByVisitor) {
+      if (now - timestamp > COOLDOWN_MS) {
+        lastRequestByVisitor.delete(id);
+      }
+    }
+  }
+
+  const systemInstruction =
+    "You are KingsAI, the friendly royal AI assistant " +
+    "inside KingsWeb. " +
+    "Be helpful, clear, and welcoming. " +
+    "Use a crown emoji occasionally. " +
     "Your name is KingsAI. " +
     "You are powered by Google's Gemini model. " +
-    "For local time questions, use Phoenix, Arizona. " +
-    "Current Phoenix time: " + phoenixTime() + ".";
+    "Never claim KingsWeb created the underlying AI model. " +
+    "For local time questions, use Phoenix, Arizona time. " +
+    "The current Phoenix date and time is: " +
+    phoenixTime() + ".";
 
-  // Diagnostic test: send ONLY the newest message.
-  // This isolates problems caused by conversation history.
-  const testInput =
-    prompt + "\n\nUser: " +
-    latest.content.slice(0, 1200);
+  // Preserve recent conversation history without storing
+  // the interaction on Google's server.
+  const input = messages.map(message => ({
+    type: message.role === "user"
+      ? "user_input"
+      : "model_output",
+    content: [{
+      type: "text",
+      text: message.content.slice(0, 1200)
+    }]
+  }));
 
   const started = Date.now();
 
-  console.log("KingsAI diagnostic request started", {
+  console.log("KingsAI Interactions request started", {
     model: MODEL,
-    endpoint: "generateContent",
-    inputLength: testInput.length
+    messageCount: input.length
   });
 
   try {
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/" +
-      MODEL + ":generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/interactions",
       {
         method: "POST",
         headers: {
@@ -161,15 +185,16 @@ export default async function handler(request, context) {
           "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
-          contents: [{
-            role: "user",
-            parts: [{ text: testInput }]
-          }],
-          generationConfig: {
-            maxOutputTokens: 256
+          model: MODEL,
+          input,
+          system_instruction: systemInstruction,
+          store: false,
+          generation_config: {
+            max_output_tokens: 1024,
+            thinking_level: "low"
           }
         }),
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(TIMEOUT_MS)
       }
     );
 
@@ -177,10 +202,11 @@ export default async function handler(request, context) {
     const raw = await response.text();
 
     let data;
+
     try {
       data = JSON.parse(raw);
     } catch {
-      console.error("Gemini returned non-JSON", {
+      console.error("Gemini returned invalid JSON", {
         status: response.status,
         elapsed
       });
@@ -190,18 +216,16 @@ export default async function handler(request, context) {
       }, 502);
     }
 
-    console.log("Gemini diagnostic result", {
-      status: response.status,
-      elapsed,
-      errorCode: data.error?.code || null,
-      errorStatus: data.error?.status || null,
-      errorMessage: data.error?.message?.slice(0, 500) || null
-    });
-
     if (!response.ok) {
+      console.error("Gemini Interactions API error", {
+        status: response.status,
+        elapsed,
+        details: data.error?.message?.slice(0, 800)
+      });
+
       if (response.status === 429) {
         return reply({
-          error: "Gemini API rate limit reached. Try again later."
+          error: "👑 Gemini usage limit reached. Please try again later."
         }, 429);
       }
 
@@ -213,17 +237,39 @@ export default async function handler(request, context) {
       }, 502);
     }
 
-    const text = (
-      data.candidates?.[0]?.content?.parts || []
-    )
+    if (data.status && data.status !== "completed") {
+      console.error("Gemini interaction not completed", {
+        status: data.status,
+        elapsed
+      });
+
+      return reply({
+        error: "Gemini did not finish its response."
+      }, 502);
+    }
+
+    const steps = Array.isArray(data.steps)
+      ? data.steps
+      : [];
+
+    const modelSteps = steps.filter(
+      step => step.type === "model_output"
+    );
+
+    const lastModelStep =
+      modelSteps[modelSteps.length - 1];
+
+    const text = (lastModelStep?.content || [])
+      .filter(part => part.type === "text")
       .map(part => part.text || "")
       .join("")
       .trim();
 
     if (!text) {
       console.error("Gemini returned no text", {
-        finishReason:
-          data.candidates?.[0]?.finishReason || null
+        status: data.status,
+        stepTypes: steps.map(step => step.type),
+        elapsed
       });
 
       return reply({
@@ -231,16 +277,19 @@ export default async function handler(request, context) {
       }, 502);
     }
 
-    console.log("KingsAI diagnostic succeeded", {
-      elapsed
+    console.log("KingsAI response successful", {
+      elapsed,
+      characters: text.length
     });
 
-    return reply({ reply: text });
+    return reply({
+      reply: text
+    });
 
   } catch (error) {
     const elapsed = Date.now() - started;
 
-    console.error("KingsAI diagnostic failed", {
+    console.error("KingsAI request failed", {
       name: error.name,
       message: error.message,
       elapsed
@@ -248,8 +297,8 @@ export default async function handler(request, context) {
 
     return reply({
       error: error.name === "TimeoutError"
-        ? "Gemini did not respond within 12 seconds."
-        : "KingsAI network request failed. Check Netlify logs."
+        ? "KingsAI took too long to respond. Please try again."
+        : "KingsAI could not connect to Gemini."
     }, 503);
   }
 }
