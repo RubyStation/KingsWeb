@@ -155,18 +155,6 @@ export default async function handler(request) {
       headers: CORS_HEADERS
     });
   }
-
-  if (request.method !== "POST") {
-    return json({ error: "Only POST requests are allowed." }, 405);
-  }
-
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store"
-    }
-  });
-}
-
-export default async function handler(request) {
   if (request.method !== "POST") {
     return json({ error: "Only POST requests are allowed." }, 405);
   }
